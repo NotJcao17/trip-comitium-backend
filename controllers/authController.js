@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 
 exports.joinTrip = async (req, res) => {
     const { shareCode, name, accessPin } = req.body;
@@ -34,15 +35,19 @@ exports.joinTrip = async (req, res) => {
             participant = participants[0];
 
             // Verificar PIN
-            if (participant.access_pin !== accessPin) {
+            const isMatch = await bcrypt.compare(accessPin, participant.access_pin);
+
+            if (!isMatch) {
                 return res.status(401).json({ error: 'Credenciales incorrectas (Nombre ocupado o PIN erróneo).' });
             }
 
         } else {
             // --- ESCENARIO B: REGISTRO (El usuario es nuevo) ---
+            const hashedPin = await bcrypt.hash(accessPin, 10);
+
             const [result] = await db.query(
                 'INSERT INTO participants (trip_id, name, access_pin, is_admin) VALUES (?, ?, ?, ?)',
-                [tripId, normalizedName, accessPin, false]
+                [tripId, normalizedName, hashedPin, false]
             );
 
             participant = {

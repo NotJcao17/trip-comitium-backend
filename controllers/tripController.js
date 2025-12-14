@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 
 // Función para generar códigos aleatorios
 const generateCode = () => {
@@ -32,10 +33,12 @@ exports.createTrip = async (req, res) => {
 
         const newTripId = tripResult.insertId;
 
-        // C. Insertar al Administrador en la BD (tabla participants), se podría encriptar el PIN para un proyecto mayor
+        const hashedPin = await bcrypt.hash(adminPin, 10); // ahora si con esto de encriptar el pin con bcrypt
+
+        // C. Insertar al Administrador en la BD (tabla participants)
         const [adminResult] = await db.query(
             'INSERT INTO participants (trip_id, name, access_pin, is_admin) VALUES (?, ?, ?, ?)',
-            [newTripId, adminName.toLowerCase(), adminPin, true]
+            [newTripId, adminName.toLowerCase(), hashedPin, true]
         );
 
         const newAdminId = adminResult.insertId;

@@ -1,35 +1,31 @@
 const mysql = require('mysql2');
-const dotenv = require('dotenv'); // para cargar el env
+const dotenv = require('dotenv');
 
-// Cargar variables de entorno
 dotenv.config();
 
-// Crear el pool de conexiones
-const pool = mysql.createPool({
+// Configuración condicional de SSL para producción vs local
+const dbConfig = {
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
-    port: process.env.DB_PORT || 3306,
+    port: process.env.DB_PORT || 4000, // TiDB usa 4000 por defecto, MySQL 3306
     waitForConnections: true,
-    connectionLimit: 10,
+    // EN SERVERLESS: Mantén esto en 1 para evitar saturar la BD con múltiples lambdas
+    connectionLimit: 1,
     queueLimit: 0
-});
+};
 
-// Convertir a promesas para poder usar async/await
+// Si estamos en producción (o si una variable lo indica), activamos SSL
+if (process.env.NODE_ENV === 'production' || process.env.DB_SSL === 'true') {
+    dbConfig.ssl = {
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: true
+    };
+}
+
+const pool = mysql.createPool(dbConfig);
+
 const promisePool = pool.promise();
-
-// Prueba de conexión inicial 
-pool.getConnection((err, connection) => {
-    if (err) {
-        console.error('Error conectando a la BD:', err.code);
-        if (err.code === 'ECONNREFUSED') console.error('Revisa si MySQL está prendido o la contraseña es incorrecta.');
-        if (err.code === 'ER_BAD_DB_ERROR') console.error('Revisa si el nombre de la BD en .env es correcto.');
-    }
-    if (connection) {
-        console.log('Conectado exitosamente a MySQL Database');
-        connection.release();
-    }
-});
 
 module.exports = promisePool;

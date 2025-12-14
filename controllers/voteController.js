@@ -20,36 +20,23 @@ exports.submitVote = async (req, res) => {
             return res.status(400).json({ error: 'La votación está cerrada.' });
         }
 
-        // 2. Verificar si el usuario YA votó en esta encuesta
-        const [existingVote] = await db.query(
-            'SELECT vote_id FROM votes WHERE poll_id = ? AND participant_id = ?',
-            [pollId, participantId]
-        );
-
+        // 2. UPSERT
         const valueJson = voteValue ? JSON.stringify(voteValue) : null;
 
-        if (existingVote.length > 0) {
-            // --- CASO A: ACTUALIZAR (UPDATE) ---
-            await db.query(
-                `UPDATE votes 
-                 SET option_id = ?, vote_value = ?, text_response = ? 
-                 WHERE vote_id = ?`,
-                [optionId || null, valueJson, textResponse || null, existingVote[0].vote_id]
-            );
-            res.json({ message: 'Voto actualizado correctamente.' });
+        await db.query(
+            `INSERT INTO votes (poll_id, participant_id, option_id, vote_value, text_response) 
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE 
+             option_id = VALUES(option_id), 
+             vote_value = VALUES(vote_value), 
+             text_response = VALUES(text_response)`,
+            [pollId, participantId, optionId || null, valueJson, textResponse || null]
+        );
 
-        } else {
-            // --- CASO B: INSERTAR (INSERT) ---
-            await db.query(
-                `INSERT INTO votes (poll_id, participant_id, option_id, vote_value, text_response) 
-                 VALUES (?, ?, ?, ?, ?)`,
-                [pollId, participantId, optionId || null, valueJson, textResponse || null]
-            );
-            res.status(201).json({ message: 'Voto registrado exitosamente.' });
-        }
+        res.status(200).json({ message: 'Voto registrado correctamente.' });
 
     } catch (error) {
-        console.error(error);
+        console.error('Error al votar:', error);
         res.status(500).json({ error: 'Error al procesar el voto.' });
     }
 };
