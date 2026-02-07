@@ -19,18 +19,18 @@ This repository contains the RESTful API for **Trip Comitium**, a Full Stack app
 
 ### Installation
 1. **Clone the repository:**
-   git clone [https://github.com/NotJcao17/trip-comitium-backend.git]
-   cd trip-comitium-backend
+   - git clone [https://github.com/NotJcao17/trip-comitium-backend.git]
+   - cd trip-comitium-backend
 2. **Install dependencies**
-   npm install
+   - npm install
 3. **Environment Configuration**
-   DB_HOST=your_host
-   DB_USER=your_user
-   DB_PASSWORD=your_password
-   DB_NAME=your_db_name
-   DB_PORT=your_port
-   JWT_SECRET=your_secret_key
+   - DB_HOST=your_host
+   - DB_USER=your_user
+   - DB_PASSWORD=your_password
+   - DB_NAME=your_db_name
+   - DB_PORT=your_port
+   - JWT_SECRET=your_secret_key
 4. **Run Server**
-   node index.js
+   - node index.js
 5. **Live Demo**
-   Access the application here: https://trip-comitium.netlify.app/
+   - Access the application here: https://trip-comitium.netlify.app/
