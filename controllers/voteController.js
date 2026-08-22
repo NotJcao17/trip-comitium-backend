@@ -9,11 +9,14 @@ exports.submitVote = async (req, res) => {
     }
 
     try {
-        // 1. Verificar si la encuesta está activa
-        const [pollRows] = await db.query('SELECT status FROM polls WHERE poll_id = ?', [pollId]);
+        // 1. Verificar si la encuesta existe, pertenece al viaje del usuario y está activa
+        const [pollRows] = await db.query(
+            'SELECT status FROM polls WHERE poll_id = ? AND trip_id = ?',
+            [pollId, req.user.tripId]
+        );
 
         if (pollRows.length === 0) {
-            return res.status(404).json({ error: 'Encuesta no encontrada.' });
+            return res.status(404).json({ error: 'Encuesta no encontrada o no pertenece a este viaje.' });
         }
 
         if (pollRows[0].status !== 'active') {
@@ -45,11 +48,14 @@ exports.submitVote = async (req, res) => {
 exports.getMyVote = async (req, res) => {
     const { pollId } = req.params;
     const participantId = req.user.id;
+    const tripId = req.user.tripId;
 
     try {
         const [rows] = await db.query(
-            'SELECT * FROM votes WHERE poll_id = ? AND participant_id = ?',
-            [pollId, participantId]
+            `SELECT v.* FROM votes v
+             JOIN polls p ON v.poll_id = p.poll_id
+             WHERE v.poll_id = ? AND v.participant_id = ? AND p.trip_id = ?`,
+            [pollId, participantId, tripId]
         );
 
         if (rows.length === 0) {
@@ -59,6 +65,7 @@ exports.getMyVote = async (req, res) => {
         res.json(rows[0]);
 
     } catch (error) {
+        console.error('Error al obtener voto:', error);
         res.status(500).json({ error: 'Error al obtener voto.' });
     }
 };

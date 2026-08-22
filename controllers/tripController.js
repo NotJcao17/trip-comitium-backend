@@ -1,84 +1,124 @@
 const db = require('../config/db');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 
-// Función para generar códigos aleatorios
+// Función para generar códigos aleatorios criptográficamente seguros
 const generateCode = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let code = '';
+    const bytes = crypto.randomBytes(5);
     for (let i = 0; i < 5; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
+        code += chars.charAt(bytes[i] % chars.length);
     }
     return code;
 };
 
 // 1. CREAR NUEVO VIAJE
 exports.createTrip = async (req, res) => {
-    const { tripName, tripDescription, adminName, adminPin } = req.body;
+    const { tripName, tripDescription, adminName, adminPin, roomType, roster } = req.body;
 
     // Validación simple
     if (!tripName || !adminName || !adminPin) {
-        return res.status(400).json({ error: 'Faltan datos obligatorios.' });
+        return res.status(400).json({ error: 'Faltan datos obligatorios (Nombre de viaje, Nombre de admin o PIN).' });
     }
 
+    const selectedRoomType = roomType === 'closed' ? 'closed' : 'open';
+
     try {
-        // A. Generar código único
-        let shareCode = generateCode(); // se podría agregar validación para q no se repita el código pero poco probable
+        let newTripId = null;
+        let shareCode = '';
+        let attempts = 0;
+        const maxAttempts = 5;
 
-        // B. Insertar el Viaje en la BD
-        const [tripResult] = await db.query(
-            'INSERT INTO trips (name, description, share_code) VALUES (?, ?, ?)',
-            [tripName, tripDescription, shareCode]
-        );
+        // Bucle para manejar colisiones de código único (share_code)
+        while (attempts < maxAttempts && !newTripId) {
+            attempts++;
+            shareCode = generateCode();
+            try {
+                const [tripResult] = await db.query(
+                    'INSERT INTO trips (name, description, share_code, room_type) VALUES (?, ?, ?, ?)',
+                    [tripName.trim(), tripDescription ? tripDescription.trim() : null, shareCode, selectedRoomType]
+                );
+                newTripId = tripResult.insertId;
+            } catch (err) {
+                if (err.code === 'ER_DUP_ENTRY' && attempts < maxAttempts) {
+                    continue; // Reintentar con otro código
+                }
+                throw err;
+            }
+        }
 
-        const newTripId = tripResult.insertId;
+        if (!newTripId) {
+            return res.status(500).json({ error: 'No se pudo generar un código de viaje único. Inténtalo de nuevo.' });
+        }
 
-        const hashedPin = await bcrypt.hash(adminPin, 10); // ahora si con esto de encriptar el pin con bcrypt
+        const hashedPin = await bcrypt.hash(adminPin, 10);
+        const normalizedAdminName = adminName.trim();
 
-        // C. Insertar al Administrador en la BD (tabla participants)
+        // Insertar al Administrador en la BD (tabla participants)
         const [adminResult] = await db.query(
-            'INSERT INTO participants (trip_id, name, access_pin, is_admin) VALUES (?, ?, ?, ?)',
-            [newTripId, adminName.toLowerCase(), hashedPin, true]
+            'INSERT INTO participants (trip_id, name, access_pin, is_admin, status) VALUES (?, ?, ?, ?, ?)',
+            [newTripId, normalizedAdminName, hashedPin, true, 'active']
         );
 
         const newAdminId = adminResult.insertId;
 
-        // D. Generar el Token de Sesión (JWT) para que el admin entre directo
+        // Si es sala cerrada y se proporcionó una lista de participantes predefinidos (roster)
+        if (selectedRoomType === 'closed' && Array.isArray(roster) && roster.length > 0) {
+            for (const rawName of roster) {
+                const cleanName = typeof rawName === 'string' ? rawName.trim() : '';
+                if (cleanName && cleanName.toLowerCase() !== normalizedAdminName.toLowerCase()) {
+                    await db.query(
+                        'INSERT INTO participants (trip_id, name, access_pin, is_admin, status) VALUES (?, ?, NULL, false, ?)',
+                        [newTripId, cleanName, 'invited']
+                    );
+                }
+            }
+        }
+
+        // Generar el Token de Sesión (JWT) para que el admin entre directo
         const token = jwt.sign(
             {
                 id: newAdminId,
-                name: adminName,
+                name: normalizedAdminName,
                 isAdmin: true,
                 tripId: newTripId
             },
             process.env.JWT_SECRET
         );
 
-        // E. Responder al Frontend
+        // Responder al Frontend
         res.status(201).json({
             message: 'Viaje creado exitosamente',
             trip: {
                 id: newTripId,
                 name: tripName,
-                shareCode: shareCode
+                shareCode: shareCode,
+                roomType: selectedRoomType
             },
-            token: token // Enviar el token para que Angular lo guarde
+            token: token,
+            user: {
+                id: newAdminId,
+                name: normalizedAdminName,
+                isAdmin: true
+            }
         });
 
     } catch (error) {
-        console.error(error);
+        console.error('Error al crear el viaje:', error);
         res.status(500).json({ error: 'Error al crear el viaje' });
     }
 };
 
-// 2. OBTENER INFORMACIÓN DE UN VIAJE POR CODIGO
+// 2. OBTENER INFORMACIÓN DE UN VIAJE POR CÓDIGO
 exports.getTripByCode = async (req, res) => {
     const { code } = req.params;
 
     try {
         const [rows] = await db.query(
-            'SELECT trip_id, name, description, share_code FROM trips WHERE share_code = ?',
-            [code]
+            'SELECT trip_id, name, description, share_code, room_type, created_at FROM trips WHERE share_code = ?',
+            [code.trim().toUpperCase()]
         );
 
         if (rows.length === 0) {
@@ -88,35 +128,137 @@ exports.getTripByCode = async (req, res) => {
         res.json(rows[0]);
 
     } catch (error) {
-        console.error(error);
+        console.error('Error al buscar viaje:', error);
         res.status(500).json({ error: 'Error al buscar el viaje' });
     }
 };
 
-// 3. OBTENER PARTICIPANTES DEL VIAJE (Solo para usuarios del viaje)
+// 3. OBTENER ROSTER DE PARTICIPANTES PARA SALA CERRADA (Público con código)
+exports.getRosterByCode = async (req, res) => {
+    const { code } = req.params;
+
+    try {
+        const [tripRows] = await db.query(
+            'SELECT trip_id, room_type FROM trips WHERE share_code = ?',
+            [code.trim().toUpperCase()]
+        );
+
+        if (tripRows.length === 0) {
+            return res.status(404).json({ error: 'Viaje no encontrado' });
+        }
+
+        const trip = tripRows[0];
+
+        // Obtener participantes registrados e invitados
+        const [participants] = await db.query(
+            'SELECT participant_id, name, is_admin, status, (access_pin IS NOT NULL) AS is_claimed FROM participants WHERE trip_id = ? ORDER BY name ASC',
+            [trip.trip_id]
+        );
+
+        res.json({
+            roomType: trip.room_type,
+            participants: participants.map(p => ({
+                id: p.participant_id,
+                name: p.name,
+                isAdmin: Boolean(p.is_admin),
+                status: p.status,
+                isClaimed: Boolean(p.is_claimed)
+            }))
+        });
+
+    } catch (error) {
+        console.error('Error al obtener roster:', error);
+        res.status(500).json({ error: 'Error al obtener lista de participantes' });
+    }
+};
+
+// 4. OBTENER PARTICIPANTES DEL VIAJE (Autenticado)
 exports.getParticipants = async (req, res) => {
-    const tripId = req.user.tripId; // Del token
+    const tripId = req.user.tripId;
 
     try {
         const [participants] = await db.query(
-            'SELECT participant_id, name, is_admin FROM participants WHERE trip_id = ? ORDER BY is_admin DESC, name ASC',
+            'SELECT participant_id, name, is_admin, status, (access_pin IS NOT NULL) AS is_claimed FROM participants WHERE trip_id = ? ORDER BY is_admin DESC, name ASC',
             [tripId]
         );
-        res.json(participants);
+        res.json(participants.map(p => ({
+            participant_id: p.participant_id,
+            name: p.name,
+            is_admin: Boolean(p.is_admin),
+            status: p.status,
+            is_claimed: Boolean(p.is_claimed)
+        })));
     } catch (error) {
-        console.error(error);
+        console.error('Error al obtener participantes:', error);
         res.status(500).json({ error: 'Error al obtener participantes' });
     }
 };
 
-// 4. ELIMINAR PARTICIPANTE
-exports.deleteParticipant = async (req, res) => {
+// 5. RESTABLECER PIN DE UN PARTICIPANTE (Solo Admin)
+exports.resetParticipantPin = async (req, res) => {
     const { id } = req.params;
-    const tripId = req.user.tripId; // Del token (para asegurar que solo borre de su viaje)
+    const tripId = req.user.tripId;
+
+    if (Number(id) === Number(req.user.id)) {
+        return res.status(400).json({ error: 'No puedes restablecer tu propio PIN como administrador desde esta acción.' });
+    }
 
     try {
-        // Opcional: Verificar que no se borre a sí mismo o al admin principal si se requiere
-        // Por ahora, confiamos en que el frontend no muestra el botón para admins
+        const [targetRows] = await db.query(
+            'SELECT participant_id, name, is_admin FROM participants WHERE participant_id = ? AND trip_id = ?',
+            [id, tripId]
+        );
+
+        if (targetRows.length === 0) {
+            return res.status(404).json({ error: 'Participante no encontrado en este viaje.' });
+        }
+
+        if (targetRows[0].is_admin) {
+            return res.status(403).json({ error: 'No se puede restablecer el PIN de un administrador.' });
+        }
+
+        // Restablecer el PIN a NULL y estado a 'invited'
+        await db.query(
+            'UPDATE participants SET access_pin = NULL, status = "invited" WHERE participant_id = ? AND trip_id = ?',
+            [id, tripId]
+        );
+
+        res.json({
+            message: `El PIN de ${targetRows[0].name} ha sido restablecido. Ahora podrá ingresar un nuevo PIN al entrar.`,
+            participantId: Number(id)
+        });
+
+    } catch (error) {
+        console.error('Error al restablecer PIN:', error);
+        res.status(500).json({ error: 'Error al restablecer PIN del participante' });
+    }
+};
+
+// 6. ELIMINAR PARTICIPANTE (Solo Admin)
+exports.deleteParticipant = async (req, res) => {
+    const { id } = req.params;
+    const tripId = req.user.tripId;
+
+    if (Number(id) === Number(req.user.id)) {
+        return res.status(400).json({ error: 'No puedes eliminarte a ti mismo como administrador.' });
+    }
+
+    try {
+        const [targetRows] = await db.query(
+            'SELECT participant_id, is_admin FROM participants WHERE participant_id = ? AND trip_id = ?',
+            [id, tripId]
+        );
+
+        if (targetRows.length === 0) {
+            return res.status(404).json({ error: 'Participante no encontrado o no pertenece a este viaje' });
+        }
+
+        if (targetRows[0].is_admin) {
+            return res.status(403).json({ error: 'No se puede eliminar a un administrador del viaje.' });
+        }
+
+        // Eliminar votos del participante primero
+        await db.query('DELETE FROM votes WHERE participant_id = ?', [id]);
 
         const [result] = await db.query(
             'DELETE FROM participants WHERE participant_id = ? AND trip_id = ?',
@@ -124,13 +266,13 @@ exports.deleteParticipant = async (req, res) => {
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Participante no encontrado o no pertenece a este viaje' });
+            return res.status(404).json({ error: 'No se pudo eliminar el participante.' });
         }
 
         res.json({ message: 'Participante eliminado correctamente' });
 
     } catch (error) {
-        console.error(error);
+        console.error('Error al eliminar participante:', error);
         res.status(500).json({ error: 'Error al eliminar participante' });
     }
 };
