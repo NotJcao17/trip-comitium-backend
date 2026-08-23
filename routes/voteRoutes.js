@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const voteController = require('../controllers/voteController');
 const auth = require('../middleware/auth');
+const { voteLimiter } = require('../middleware/rateLimiter');
 
-// POST /api/votes -> Votar (Upsert logic)
-router.post('/', auth, voteController.submitVote);
+// POST /api/votes -> Votar (Upsert logic con limitador de tasa)
+router.post('/', auth, voteLimiter, voteController.submitVote);
 
 // GET /api/votes/:pollId/my-vote -> Ver qué voté yo (para pintar el botón seleccionado en el frontend)
 router.get('/:pollId/my-vote', auth, voteController.getMyVote);

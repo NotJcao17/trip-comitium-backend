@@ -25,6 +25,7 @@ CREATE TABLE polls (
     poll_id INT AUTO_INCREMENT PRIMARY KEY,
     trip_id INT NOT NULL,
     title VARCHAR(255) NOT NULL,
+    description TEXT,
     type ENUM('date', 'tier_list', 'slider', 'multiple_choice', 'text') NOT NULL,
     status ENUM('active', 'locked', 'hidden') DEFAULT 'active',
     config JSON, 

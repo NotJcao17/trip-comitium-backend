@@ -276,3 +276,48 @@ exports.deleteParticipant = async (req, res) => {
         res.status(500).json({ error: 'Error al eliminar participante' });
     }
 };
+
+// 7. AGREGAR PARTICIPANTE A SALA CERRADA O ABIERTA (Solo Admin)
+exports.addParticipant = async (req, res) => {
+    const { name } = req.body;
+    const tripId = req.user.tripId;
+
+    if (!name || !name.trim()) {
+        return res.status(400).json({ error: 'Debes proporcionar un nombre válido.' });
+    }
+
+    const cleanName = name.trim();
+
+    try {
+        // Verificar si ya existe alguien con este nombre en el viaje
+        const [existing] = await db.query(
+            'SELECT participant_id FROM participants WHERE trip_id = ? AND LOWER(name) = LOWER(?)',
+            [tripId, cleanName]
+        );
+
+        if (existing.length > 0) {
+            return res.status(400).json({ error: `Ya existe un integrante registrado o invitado con el nombre "${cleanName}".` });
+        }
+
+        // Insertar nuevo participante como invitado sin PIN
+        const [result] = await db.query(
+            'INSERT INTO participants (trip_id, name, access_pin, is_admin, status) VALUES (?, ?, NULL, false, "invited")',
+            [tripId, cleanName]
+        );
+
+        res.status(201).json({
+            message: `"${cleanName}" ha sido agregado a la lista del viaje.`,
+            participant: {
+                participant_id: result.insertId,
+                name: cleanName,
+                is_admin: false,
+                status: 'invited',
+                is_claimed: false
+            }
+        });
+
+    } catch (error) {
+        console.error('Error al agregar participante:', error);
+        res.status(500).json({ error: 'Error al agregar participante al viaje.' });
+    }
+};

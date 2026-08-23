@@ -22,7 +22,19 @@ const createTripLimiter = rateLimit({
     }
 });
 
+// Límite para emisión de votos (prevenir flooding/spam)
+const voteLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minuto
+    max: 60, // Máximo 60 votos por minuto por IP
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: 'Demasiadas solicitudes de voto. Por favor espera un momento.'
+    }
+});
+
 module.exports = {
     authLimiter,
-    createTripLimiter
+    createTripLimiter,
+    voteLimiter
 };

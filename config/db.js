@@ -13,7 +13,7 @@ const dbConfig = {
     database: process.env.DB_NAME,
     port: process.env.DB_PORT || 4000, // TiDB usa 4000 por defecto, MySQL 3306
     waitForConnections: true,
-    connectionLimit: 5,
+    connectionLimit: Number(process.env.DB_CONNECTION_LIMIT) || 15,
     queueLimit: 0
 };
 

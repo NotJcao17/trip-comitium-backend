@@ -78,6 +78,30 @@ async function testBackend() {
         await tripCtrl.resetParticipantPin(reqReset, resReset);
         console.log('✅ Admin reseteó PIN de Sofía:', resReset.statusCode, resReset.body?.message);
 
+        // 6. Admin agrega un nuevo integrante a la sala cerrada
+        const reqAddPart = {
+            user: { id: resCreate.body.user.id, tripId: resCreate.body.trip.id, isAdmin: true },
+            body: { name: 'Lucas Mendoza' }
+        };
+        const resAddPart = mockRes();
+        await tripCtrl.addParticipant(reqAddPart, resAddPart);
+        console.log('✅ Admin agregó a Lucas Mendoza a la sala cerrada:', resAddPart.statusCode, resAddPart.body?.message);
+
+        // 7. Crear encuesta con descripción personalizada
+        const pollCtrl = require('./controllers/pollController');
+        const reqCreatePoll = {
+            user: { id: resCreate.body.user.id, tripId: resCreate.body.trip.id, isAdmin: true },
+            body: {
+                title: '¿Qué cabaña prefieren para acampar?',
+                description: 'Por favor califiquen según ubicación y cercanía al lago.',
+                type: 'tier_list',
+                options: ['Cabaña El Pino', 'Glamping Río', 'Refugio Cumbre']
+            }
+        };
+        const resCreatePoll = mockRes();
+        await pollCtrl.createPoll(reqCreatePoll, resCreatePoll);
+        console.log('✅ Encuesta creada con descripción personalizada:', resCreatePoll.statusCode, resCreatePoll.body);
+
         console.log('\n🎉 ¡TODAS LAS PRUEBAS DE BACKEND Y TIDB CLOUD PASARON SATISFACTORIAMENTE!');
         process.exit(0);
 

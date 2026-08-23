@@ -11,6 +11,9 @@ router.post('/', createTripLimiter, tripController.createTrip);
 // GET /api/trips/participants -> Obtener lista de participantes (requiere auth)
 router.get('/participants', auth, tripController.getParticipants);
 
+// POST /api/trips/participants -> Agregar participante al viaje (Solo Admin)
+router.post('/participants', auth, verifyAdmin, tripController.addParticipant);
+
 // POST /api/trips/participants/:id/reset-pin -> Restablecer PIN de participante (Solo Admin)
 router.post('/participants/:id/reset-pin', auth, verifyAdmin, tripController.resetParticipantPin);
 

@@ -4,7 +4,7 @@ const db = require('../config/db');
 exports.createPoll = async (req, res) => {
     // Obtenemos el ID del viaje del token del usuario
     const tripId = req.user.tripId;
-    const { title, type, config, options } = req.body;
+    const { title, description, type, config, options } = req.body;
 
     if (!title || !type) {
         return res.status(400).json({ error: 'Título y Tipo son obligatorios.' });
@@ -13,8 +13,8 @@ exports.createPoll = async (req, res) => {
     try {
         // A. Insertar la Encuesta en la tabla 'polls'
         const [pollResult] = await db.query(
-            'INSERT INTO polls (trip_id, title, type, config, status) VALUES (?, ?, ?, ?, ?)',
-            [tripId, title, type, JSON.stringify(config || {}), 'active']
+            'INSERT INTO polls (trip_id, title, description, type, config, status) VALUES (?, ?, ?, ?, ?, ?)',
+            [tripId, title.trim(), description ? description.trim() : null, type, JSON.stringify(config || {}), 'active']
         );
 
         const newPollId = pollResult.insertId;
