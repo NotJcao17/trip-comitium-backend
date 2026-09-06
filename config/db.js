@@ -14,7 +14,12 @@ const dbConfig = {
     port: process.env.DB_PORT || 4000, // TiDB usa 4000 por defecto, MySQL 3306
     waitForConnections: true,
     connectionLimit: Number(process.env.DB_CONNECTION_LIMIT) || 15,
-    queueLimit: 0
+    queueLimit: 0,
+    // TiDB Serverless cierra las conexiones inactivas por su cuenta. Sin esto,
+    // el pool entrega un socket ya muerto y la petición revienta con ECONNRESET.
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
+    idleTimeout: 60000
 };
 
 // Si estamos en producción o DB_SSL es true, configurar SSL

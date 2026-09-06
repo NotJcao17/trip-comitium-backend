@@ -4,7 +4,7 @@ const db = require('../config/db');
 exports.createPoll = async (req, res) => {
     // Obtenemos el ID del viaje del token del usuario
     const tripId = req.user.tripId;
-    const { title, description, type, config, options } = req.body;
+    const { title, description, type, config, options, isAnonymous } = req.body;
 
     if (!title || !type) {
         return res.status(400).json({ error: 'Título y Tipo son obligatorios.' });
@@ -13,21 +13,35 @@ exports.createPoll = async (req, res) => {
     try {
         // A. Insertar la Encuesta en la tabla 'polls'
         const [pollResult] = await db.query(
-            'INSERT INTO polls (trip_id, title, description, type, config, status) VALUES (?, ?, ?, ?, ?, ?)',
-            [tripId, title.trim(), description ? description.trim() : null, type, JSON.stringify(config || {}), 'active']
+            'INSERT INTO polls (trip_id, title, description, type, config, status, is_anonymous) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [tripId, title.trim(), description ? description.trim() : null, type, JSON.stringify(config || {}), 'active', isAnonymous ? 1 : 0]
         );
 
         const newPollId = pollResult.insertId;
 
         // B. Insertar las Opciones (si existen) en 'poll_options'
+        // Cada opción puede llegar como texto plano ("Cabaña") o como objeto
+        // con detalles ({ text: 'Cabaña', description: '$1,200 la noche...' })
         if (options && Array.isArray(options) && options.length > 0) {
-            // Preparar un array de arrays para insertar: [[id, texto], [id, texto]]
-            const optionsValues = options.map(optText => [newPollId, optText]);
+            const optionsValues = options
+                .map(opt => {
+                    const text = typeof opt === 'string' ? opt : opt?.text;
+                    const desc = typeof opt === 'string' ? null : opt?.description;
+                    if (!text || !String(text).trim()) return null;
+                    return [
+                        newPollId,
+                        String(text).trim(),
+                        desc && String(desc).trim() ? String(desc).trim() : null
+                    ];
+                })
+                .filter(Boolean);
 
-            await db.query(
-                'INSERT INTO poll_options (poll_id, text) VALUES ?',
-                [optionsValues]
-            );
+            if (optionsValues.length > 0) {
+                await db.query(
+                    'INSERT INTO poll_options (poll_id, text, description) VALUES ?',
+                    [optionsValues]
+                );
+            }
         }
 
         res.status(201).json({ message: 'Encuesta creada exitosamente', pollId: newPollId });

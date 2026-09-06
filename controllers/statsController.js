@@ -23,11 +23,18 @@ exports.getPollStats = async (req, res) => {
             WHERE v.poll_id = ?
         `, [pollId]);
 
+        // Encuesta anónima: los demás participantes ven los totales, no los nombres.
+        // El organizador sí los ve, para poder dar seguimiento a quién falta.
+        const isAnonymous = Boolean(poll.is_anonymous);
+        const hideVoters = isAnonymous && !req.user.isAdmin;
+
         let stats = {
             pollId: poll.poll_id,
             type: poll.type,
             title: poll.title,
             status: poll.status,
+            isAnonymous,
+            votersHidden: hideVoters,
             totalVotes: votes.length
         };
 
@@ -135,6 +142,28 @@ exports.getPollStats = async (req, res) => {
             case 'text':
                 stats.responses = votes.map(v => ({ id: v.participant_id, name: v.participant_name, text: v.text_response || '' }));
                 break;
+        }
+
+        if (hideVoters) {
+            delete stats.votersByOption;
+
+            if (stats.heatmap) {
+                stats.heatmap = Object.fromEntries(
+                    Object.entries(stats.heatmap).map(([date, info]) => [date, { count: info.count, voters: [] }])
+                );
+            }
+
+            if (stats.votes) {
+                stats.votes = stats.votes.map(v => ({ value: v.value }));
+            }
+
+            if (stats.rawVotes) {
+                delete stats.rawVotes;
+            }
+
+            if (stats.responses) {
+                stats.responses = stats.responses.map(r => ({ name: '', text: r.text }));
+            }
         }
 
         res.json(stats);
