@@ -42,6 +42,19 @@ CREATE TABLE poll_options (
     FOREIGN KEY (poll_id) REFERENCES polls(poll_id) ON DELETE CASCADE
 );
 
+-- 4b. Imagenes de cada opcion (enlaces directos, la imagen no vive aqui)
+CREATE TABLE poll_option_images (
+    image_id INT AUTO_INCREMENT PRIMARY KEY,
+    option_id INT NOT NULL,
+    url VARCHAR(500) NOT NULL,
+    thumb_url VARCHAR(500) NULL,
+    position TINYINT NOT NULL DEFAULT 0,
+    source VARCHAR(16) NOT NULL DEFAULT 'link',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_option_images (option_id, position),
+    FOREIGN KEY (option_id) REFERENCES poll_options(option_id) ON DELETE CASCADE
+);
+
 -- 5. Tabla de Votos
 CREATE TABLE votes (
     vote_id INT AUTO_INCREMENT PRIMARY KEY,

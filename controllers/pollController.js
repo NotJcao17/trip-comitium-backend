@@ -1,4 +1,58 @@
 const db = require('../config/db');
+const { sanitizeImageList } = require('../utils/imageLinks');
+
+/**
+ * Cuelga de cada opcion su galeria de imagenes.
+ *
+ * Una sola consulta para todas las opciones de todas las encuestas: si se
+ * pregunta por opcion, una encuesta de quince opciones son quince viajes a la
+ * base, y esto corre en una funcion sin estado donde cada viaje se paga.
+ */
+async function attachOptionImages(polls) {
+    const optionIds = [];
+    for (const poll of polls) {
+        for (const option of (poll.options || [])) {
+            option.images = [];
+            optionIds.push(option.option_id);
+        }
+    }
+
+    // `IN ()` con la lista vacia es un error de sintaxis, no un cero filas.
+    if (optionIds.length === 0) return;
+
+    let rows;
+    try {
+        [rows] = await db.query(
+            `SELECT image_id, option_id, url, thumb_url
+               FROM poll_option_images
+              WHERE option_id IN (?)
+              ORDER BY option_id, position, image_id`,
+            [optionIds]
+        );
+    } catch (error) {
+        // El despliegue y la migracion no son un solo paso: si el codigo llega
+        // antes que la tabla, las encuestas se siguen leyendo sin fotos en vez
+        // de caerse enteras. Solo se traga ese error concreto; cualquier otro
+        // sube como siempre.
+        if (error && error.code === 'ER_NO_SUCH_TABLE') {
+            console.warn('poll_option_images no existe todavia: falta correr la migracion 005.');
+            return;
+        }
+        throw error;
+    }
+
+    const byOption = new Map();
+    for (const row of rows) {
+        if (!byOption.has(row.option_id)) byOption.set(row.option_id, []);
+        byOption.get(row.option_id).push(row);
+    }
+
+    for (const poll of polls) {
+        for (const option of (poll.options || [])) {
+            option.images = byOption.get(option.option_id) || [];
+        }
+    }
+}
 
 // 1. CREAR NUEVA ENCUESTA (Solo Admin)
 exports.createPoll = async (req, res) => {
@@ -23,23 +77,42 @@ exports.createPoll = async (req, res) => {
         // Cada opción puede llegar como texto plano ("Cabaña") o como objeto
         // con detalles ({ text: 'Cabaña', description: '$1,200 la noche...' })
         if (options && Array.isArray(options) && options.length > 0) {
-            const optionsValues = options
+            const cleanOptions = options
                 .map(opt => {
                     const text = typeof opt === 'string' ? opt : opt?.text;
                     const desc = typeof opt === 'string' ? null : opt?.description;
                     if (!text || !String(text).trim()) return null;
-                    return [
-                        newPollId,
-                        String(text).trim(),
-                        desc && String(desc).trim() ? String(desc).trim() : null
-                    ];
+                    return {
+                        text: String(text).trim(),
+                        description: desc && String(desc).trim() ? String(desc).trim() : null,
+                        // Quien manda es esto, no el formulario: la peticion
+                        // puede venir de cualquier sitio.
+                        images: sanitizeImageList(typeof opt === 'string' ? [] : opt?.images)
+                    };
                 })
                 .filter(Boolean);
 
-            if (optionsValues.length > 0) {
+            // Una insercion por opcion en lugar de una en bloque: el
+            // AUTO_INCREMENT de TiDB se reparte en lotes y no garantiza ids
+            // consecutivos, asi que deducirlos del insertId podria colgarle
+            // las fotos de una opcion a otra.
+            const imageValues = [];
+
+            for (const opt of cleanOptions) {
+                const [optResult] = await db.query(
+                    'INSERT INTO poll_options (poll_id, text, description) VALUES (?, ?, ?)',
+                    [newPollId, opt.text, opt.description]
+                );
+
+                opt.images.forEach((url, position) => {
+                    imageValues.push([optResult.insertId, url, position, 'link']);
+                });
+            }
+
+            if (imageValues.length > 0) {
                 await db.query(
-                    'INSERT INTO poll_options (poll_id, text, description) VALUES ?',
-                    [optionsValues]
+                    'INSERT INTO poll_option_images (option_id, url, position, source) VALUES ?',
+                    [imageValues]
                 );
             }
         }
@@ -66,6 +139,8 @@ exports.getPollsByTrip = async (req, res) => {
             const [options] = await db.query('SELECT * FROM poll_options WHERE poll_id = ?', [poll.poll_id]);
             poll.options = options;
         }
+
+        await attachOptionImages(polls);
 
         res.json(polls);
 
@@ -146,6 +221,8 @@ exports.getPollById = async (req, res) => {
         // 2. Buscar sus opciones (Si es Tier List o Multiple Choice)
         const [options] = await db.query('SELECT * FROM poll_options WHERE poll_id = ?', [pollId]);
         poll.options = options;
+
+        await attachOptionImages([poll]);
 
         res.json(poll);
 
