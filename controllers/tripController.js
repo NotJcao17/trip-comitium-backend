@@ -2,6 +2,7 @@ const db = require('../config/db');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+const { cleanParticipantName, validateParticipantName, MAX_PARTICIPANT_NAME } = require('../utils/names');
 
 // Función para generar códigos aleatorios criptográficamente seguros
 const generateCode = () => {
@@ -21,6 +22,22 @@ exports.createTrip = async (req, res) => {
     // Validación simple
     if (!tripName || !adminName || !adminPin) {
         return res.status(400).json({ error: 'Faltan datos obligatorios (Nombre de viaje, Nombre de admin o PIN).' });
+    }
+
+    const adminNameError = validateParticipantName(cleanParticipantName(adminName));
+    if (adminNameError) return res.status(400).json({ error: adminNameError });
+
+    // La lista de la sala cerrada se revisa entera antes de crear nada: es
+    // preferible un error claro que un viaje a medio montar.
+    if (Array.isArray(roster)) {
+        for (const rawName of roster) {
+            const candidate = cleanParticipantName(rawName);
+            if (candidate && validateParticipantName(candidate)) {
+                return res.status(400).json({
+                    error: `"${candidate.slice(0, 30)}…" no sirve como nombre: no puede pasar de ${MAX_PARTICIPANT_NAME} caracteres.`
+                });
+            }
+        }
     }
 
     const selectedRoomType = roomType === 'closed' ? 'closed' : 'open';
@@ -54,7 +71,7 @@ exports.createTrip = async (req, res) => {
         }
 
         const hashedPin = await bcrypt.hash(adminPin, 10);
-        const normalizedAdminName = adminName.trim();
+        const normalizedAdminName = cleanParticipantName(adminName);
 
         // Insertar al Administrador en la BD (tabla participants)
         const [adminResult] = await db.query(
@@ -67,7 +84,7 @@ exports.createTrip = async (req, res) => {
         // Si es sala cerrada y se proporcionó una lista de participantes predefinidos (roster)
         if (selectedRoomType === 'closed' && Array.isArray(roster) && roster.length > 0) {
             for (const rawName of roster) {
-                const cleanName = typeof rawName === 'string' ? rawName.trim() : '';
+                const cleanName = cleanParticipantName(rawName);
                 if (cleanName && cleanName.toLowerCase() !== normalizedAdminName.toLowerCase()) {
                     await db.query(
                         'INSERT INTO participants (trip_id, name, access_pin, is_admin, status) VALUES (?, ?, NULL, false, ?)',

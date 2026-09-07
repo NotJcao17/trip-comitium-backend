@@ -109,7 +109,20 @@ exports.getPollStats = async (req, res) => {
             case 'tier_list':
                 // Puntuación ponderada por niveles
                 const defaultPoints = { 'S': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1, 'E': 0, 'F': 0 };
-                let itemScores = {};
+
+                // Un Map y no un objeto: conserva el orden de insercion pase
+                // lo que pase, incluso si una opcion se llama "2024".
+                const itemScores = new Map();
+
+                // Se siembra con todas las opciones en cero. Si no, el
+                // organizador no ve lo que escribio hasta que alguien lo vota,
+                // y una opcion que no le gusto a nadie desaparece del informe
+                // en vez de aparecer con cero, que es el dato util.
+                const [tierOptions] = await db.query(
+                    'SELECT text FROM poll_options WHERE poll_id = ? ORDER BY option_id',
+                    [pollId]
+                );
+                tierOptions.forEach(o => itemScores.set(o.text, 0));
 
                 votes.forEach(v => {
                     let userTier = v.vote_value || {};
@@ -118,15 +131,16 @@ exports.getPollStats = async (req, res) => {
                     }
                     if (typeof userTier === 'object' && userTier !== null) {
                         Object.keys(userTier).forEach(item => {
-                            if (!itemScores[item]) itemScores[item] = 0;
                             const tierKey = String(userTier[item]).toUpperCase();
-                            itemScores[item] += defaultPoints[tierKey] !== undefined ? defaultPoints[tierKey] : 0;
+                            const puntos = defaultPoints[tierKey] !== undefined ? defaultPoints[tierKey] : 0;
+                            itemScores.set(item, (itemScores.get(item) || 0) + puntos);
                         });
                     }
                 });
 
-                // Convertir a array ordenado
-                stats.ranking = Object.entries(itemScores)
+                // Convertir a array ordenado. El sort es estable, asi que las
+                // que empatan conservan el orden en que se crearon las opciones.
+                stats.ranking = [...itemScores.entries()]
                     .map(([item, score]) => ({ item, score }))
                     .sort((a, b) => b.score - a.score);
 

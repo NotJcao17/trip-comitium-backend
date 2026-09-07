@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const { cleanParticipantName, validateParticipantName } = require('../utils/names');
 
 exports.joinTrip = async (req, res) => {
     const { shareCode, name, accessPin } = req.body;
@@ -27,7 +28,10 @@ exports.joinTrip = async (req, res) => {
 
         const trip = trips[0];
         const tripId = trip.trip_id;
-        const cleanName = name.trim();
+        const cleanName = cleanParticipantName(name);
+
+        const nameError = validateParticipantName(cleanName);
+        if (nameError) return res.status(400).json({ error: nameError });
 
         // 2. Buscar si el participante ya existe en este viaje (búsqueda insensible a mayúsculas)
         const [participants] = await db.query(
