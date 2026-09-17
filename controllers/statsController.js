@@ -28,6 +28,29 @@ exports.getPollStats = async (req, res) => {
         const isAnonymous = Boolean(poll.is_anonymous);
         const hideVoters = isAnonymous && !req.user.isAdmin;
 
+        // 2.b Quien ya voto y quien falta. Se compara contra el padron completo
+        // del viaje y no contra los votos: un participante que nunca entro a la
+        // encuesta no aparece en `votes`, y es justo el que hay que perseguir.
+        const [roster] = await db.query(
+            'SELECT participant_id, name FROM participants WHERE trip_id = ? ORDER BY name',
+            [tripId]
+        );
+        const votedIds = new Set(votes.map(v => v.participant_id));
+        const participation = {
+            totalParticipants: roster.length,
+            votedCount: 0,
+            pendingCount: 0,
+            voted: [],
+            pending: []
+        };
+        roster.forEach(p => {
+            const ref = { id: p.participant_id, name: p.name };
+            if (votedIds.has(p.participant_id)) participation.voted.push(ref);
+            else participation.pending.push(ref);
+        });
+        participation.votedCount = participation.voted.length;
+        participation.pendingCount = participation.pending.length;
+
         let stats = {
             pollId: poll.poll_id,
             type: poll.type,
@@ -35,7 +58,8 @@ exports.getPollStats = async (req, res) => {
             status: poll.status,
             isAnonymous,
             votersHidden: hideVoters,
-            totalVotes: votes.length
+            totalVotes: votes.length,
+            participation
         };
 
         // 3. Procesar datos según el tipo de encuesta
@@ -160,6 +184,16 @@ exports.getPollStats = async (req, res) => {
 
         if (hideVoters) {
             delete stats.votersByOption;
+
+            // En una encuesta anonima la lista de pendientes delata por
+            // descarte quien ya voto, asi que solo quedan los conteos.
+            stats.participation = {
+                totalParticipants: participation.totalParticipants,
+                votedCount: participation.votedCount,
+                pendingCount: participation.pendingCount,
+                voted: [],
+                pending: []
+            };
 
             if (stats.heatmap) {
                 stats.heatmap = Object.fromEntries(
